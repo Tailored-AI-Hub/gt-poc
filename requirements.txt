@@ -9,3 +9,5 @@ scikit-learn
 Pillow
 matplotlib
 python-dotenv
+logging
+fitz

@@ -1,74 +1,134 @@
 import os
-from pdf2image import convert_from_path
+import fitz  # PyMuPDF
 from PIL import Image
-import pytesseract
-import tempfile
-from pathlib import Path
+import io
+from .logger_config import get_logger
+
+logger = get_logger(__name__)
 
 def process_file_ocr(file_path):
     """
-    Given a PDF or image file, return extracted OCR text.
-    If PDF, convert pages to images first.
+    Process a file (PDF or image) and extract text using OCR.
     """
-    file_ext = Path(file_path).suffix.lower()
-    ocr_text = ""
+    logger.info(f"Starting OCR processing for file: {file_path}")
+    
+    try:
+        if file_path.lower().endswith('.pdf'):
+            logger.debug("Processing PDF file")
+            return process_pdf_ocr(file_path)
+        else:
+            logger.debug("Processing image file")
+            return process_image_ocr(file_path)
+    except Exception as e:
+        logger.error(f"OCR processing failed for {file_path}: {e}", exc_info=True)
+        raise
 
-    if file_ext == ".pdf":
-        try:
-            with tempfile.TemporaryDirectory() as temp_dir:
-                images = convert_from_path(file_path, dpi=300, output_folder=temp_dir)
-                for i, img in enumerate(images):
-                    text = pytesseract.image_to_string(img)
-                    ocr_text += f"\n\n--- Page {i+1} ---\n\n{text}"
-        except Exception as e:
-            return {"ocr_text": f"[PDF OCR failed: {e}]"}
-    elif file_ext in [".jpg", ".jpeg", ".png"]:
-        try:
-            img = Image.open(file_path)
-            if img.mode != "RGB":
-                img = img.convert("RGB")
-            ocr_text = pytesseract.image_to_string(img)
-        except Exception as e:
-            ocr_text = f"[Image OCR failed: {e}]"
-    else:
-        ocr_text = "[Unsupported file type]"
+def process_pdf_ocr(file_path):
+    """Extract text from PDF using PyMuPDF."""
+    logger.debug(f"Extracting text from PDF: {file_path}")
+    
+    try:
+        doc = fitz.open(file_path)
+        logger.debug(f"PDF opened successfully, {len(doc)} pages")
+        
+        text_content = []
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            text = page.get_text()
+            text_content.append(text)
+            logger.debug(f"Extracted text from page {page_num + 1}: {len(text)} characters")
+        
+        doc.close()
+        
+        full_text = "\n".join(text_content)
+        logger.info(f"PDF OCR completed: {len(full_text)} total characters extracted")
+        
+        return {
+            "ocr_text": full_text,
+            "page_count": len(doc),
+            "file_type": "pdf"
+        }
+        
+    except Exception as e:
+        logger.error(f"PDF OCR failed for {file_path}: {e}", exc_info=True)
+        raise
 
+def process_image_ocr(file_path):
+    """Extract text from image using OCR (placeholder for now)."""
+    logger.debug(f"Processing image OCR for: {file_path}")
+    
+    # Placeholder - you would integrate with an OCR service here
+    logger.warning("Image OCR not implemented yet - returning placeholder")
+    
     return {
-        "ocr_text": ocr_text.strip()
+        "ocr_text": "Image OCR not implemented",
+        "page_count": 1,
+        "file_type": "image"
     }
 
 def extract_images_from_file(file_path):
-    """
-    Given a PDF or image file, return a list of image file paths (one per page for PDFs, or the image itself).
-    PDF page images are saved to a persistent directory (data/uploads/pages/).
-    """
-    file_ext = Path(file_path).suffix.lower()
-    image_paths = []
-    persistent_dir = os.path.join("data", "uploads", "pages")
-    os.makedirs(persistent_dir, exist_ok=True)
-    base_name = Path(file_path).stem
-
-    if file_ext == ".pdf":
-        try:
-            images = convert_from_path(file_path, dpi=300)
-            for i, img in enumerate(images):
-                img_path = os.path.join(persistent_dir, f"{base_name}_page_{i+1}.png")
-                img.save(img_path, "PNG")
-                image_paths.append(img_path)
-            return image_paths
-        except Exception as e:
-            return []
-    elif file_ext in [".jpg", ".jpeg", ".png"]:
-        image_paths.append(file_path)
-    return image_paths
+    """Extract images from PDF file."""
+    logger.debug(f"Extracting images from file: {file_path}")
+    
+    if not file_path.lower().endswith('.pdf'):
+        logger.debug("Not a PDF file, skipping image extraction")
+        return []
+    
+    try:
+        doc = fitz.open(file_path)
+        image_paths = []
+        
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            image_list = page.get_images()
+            
+            for img_index, img in enumerate(image_list):
+                try:
+                    xref = img[0]
+                    pix = fitz.Pixmap(doc, xref)
+                    
+                    if pix.n - pix.alpha < 4:  # GRAY or RGB
+                        img_data = pix.tobytes("png")
+                    else:  # CMYK: convert to RGB first
+                        pix1 = fitz.Pixmap(fitz.csRGB, pix)
+                        img_data = pix1.tobytes("png")
+                        pix1 = None
+                    
+                    # Save image
+                    img_filename = f"extracted_image_{page_num}_{img_index}.png"
+                    img_path = os.path.join("temp", img_filename)
+                    os.makedirs("temp", exist_ok=True)
+                    
+                    with open(img_path, "wb") as img_file:
+                        img_file.write(img_data)
+                    
+                    image_paths.append(img_path)
+                    logger.debug(f"Extracted image: {img_path}")
+                    
+                    pix = None
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to extract image {img_index} from page {page_num}: {e}")
+                    continue
+        
+        doc.close()
+        logger.info(f"Image extraction completed: {len(image_paths)} images extracted")
+        return image_paths
+        
+    except Exception as e:
+        logger.error(f"Image extraction failed for {file_path}: {e}", exc_info=True)
+        return []
 
 def cleanup_images(image_paths):
-    """
-    Delete the image files at the given paths.
-    """
+    """Clean up extracted image files."""
+    logger.debug(f"Cleaning up {len(image_paths)} extracted images")
+    
     for img_path in image_paths:
         try:
             if os.path.exists(img_path):
                 os.remove(img_path)
-        except Exception:
-            pass
+                logger.debug(f"Removed image: {img_path}")
+        except Exception as e:
+            logger.warning(f"Failed to remove image {img_path}: {e}")
+    
+    logger.info("Image cleanup completed")

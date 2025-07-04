@@ -1,4 +1,10 @@
 from difflib import SequenceMatcher
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from .logger_config import get_logger
+
+logger = get_logger(__name__)
 
 def structural_fingerprint(headers, format_style, table_size=None, handwritten_or_typed=None):
     """
@@ -26,12 +32,60 @@ def layout_similarity(f1, f2):
     """
     return SequenceMatcher(None, f1, f2).ratio()
 
-def are_layouts_similar(headers1, headers2, format1, format2, table_size1=None, table_size2=None, handwritten1=None, handwritten2=None, threshold=0.85):
+def are_layouts_similar(headers1, headers2, scanned1, scanned2, table_size1, table_size2, handwritten1, handwritten2):
     """
-    Wrapper to compare structural layout fingerprints, now including table size and handwritten/typed.
-    Returns: (bool, similarity_score)
+    Compare two invoice layouts for similarity.
     """
-    fp1 = structural_fingerprint(headers1, format1, table_size1, handwritten1)
-    fp2 = structural_fingerprint(headers2, format2, table_size2, handwritten2)
-    sim = layout_similarity(fp1, fp2)
-    return sim >= threshold, sim
+    logger.debug(f"Comparing layouts: {len(headers1)} vs {len(headers2)} headers")
+    
+    try:
+        # Basic similarity checks
+        if scanned1 != scanned2:
+            logger.debug("Different scan types detected")
+            return False, 0.0
+        
+        if handwritten1 != handwritten2:
+            logger.debug("Different handwriting types detected")
+            return False, 0.0
+        
+        # Compare table sizes if available
+        if table_size1 and table_size2:
+            size_diff = abs(table_size1 - table_size2) / max(table_size1, table_size2)
+            if size_diff > 0.3:  # More than 30% difference
+                logger.debug(f"Table sizes too different: {table_size1} vs {table_size2}")
+                return False, 0.0
+        
+        # Compare headers using TF-IDF
+        if not headers1 or not headers2:
+            logger.debug("Empty headers detected")
+            return False, 0.0
+        
+        # Convert headers to text for comparison
+        text1 = " ".join(headers1)
+        text2 = " ".join(headers2)
+        
+        logger.debug(f"Header text 1: {text1[:100]}...")
+        logger.debug(f"Header text 2: {text2[:100]}...")
+        
+        # Use TF-IDF for similarity
+        vectorizer = TfidfVectorizer(lowercase=True, stop_words='english')
+        try:
+            tfidf_matrix = vectorizer.fit_transform([text1, text2])
+            similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+            
+            logger.debug(f"Layout similarity score: {similarity:.3f}")
+            return similarity > 0.7, similarity
+            
+        except Exception as e:
+            logger.warning(f"TF-IDF comparison failed: {e}")
+            # Fallback to simple string comparison
+            common_words = set(text1.lower().split()) & set(text2.lower().split())
+            total_words = set(text1.lower().split()) | set(text2.lower().split())
+            similarity = len(common_words) / len(total_words) if total_words else 0.0
+            
+            logger.debug(f"Fallback similarity score: {similarity:.3f}")
+            return similarity > 0.5, similarity
+            
+    except Exception as e:
+        logger.error(f"Layout comparison failed: {e}", exc_info=True)
+        return False, 0.0
