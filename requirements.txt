@@ -1,0 +1,11 @@
+streamlit
+pdf2image
+pytesseract
+pandas
+openai
+fuzzywuzzy
+python-Levenshtein
+scikit-learn
+Pillow
+matplotlib
+python-dotenv
