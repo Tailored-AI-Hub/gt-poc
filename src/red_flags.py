@@ -71,7 +71,7 @@ def find_similar_format_groups(invoices, vendor_to_canonical):
                     handwritten_or_typed1, handwritten_or_typed2
                 )
                 
-                if sim > 0.9 and scanned_or_typed1 == scanned_or_typed2 and (handwritten_or_typed1 == handwritten_or_typed2):
+                if sim > 0.85 and scanned_or_typed1 == scanned_or_typed2 and (handwritten_or_typed1 == handwritten_or_typed2):
                     current_group.append(inv2)
                     processed.add(j)
         

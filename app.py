@@ -125,8 +125,8 @@ if uploaded_files and analyze_btn:
                     for contact, group in contact_groups.items():
                         st.markdown(f"**Shared Contact:** {contact}")
                         group_df = pd.DataFrame(group)
-                        display_df = group_df[['file_name', 'vendor_name', 'canonical_vendor']].copy()
-                        display_df.columns = ['Document', 'Vendor Name', 'Canonical Vendor']
+                        display_df = group_df[['file_name', 'vendor_name', 'canonical_vendor', 'flag_reason']].copy()
+                        display_df.columns = ['Document', 'Vendor Name', 'Canonical Vendor', 'Issue Detected']
                         st.table(display_df.reset_index(drop=True))
                         st.markdown("---")
                 
